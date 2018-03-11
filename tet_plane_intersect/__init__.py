@@ -50,8 +50,13 @@ _libwrap_tetinter.quad_area_3d.argtypes = [
 ]
 _libwrap_tetinter.quad_area_3d.restype = ctypes.c_double
 
+_libwrap_tetinter.tri_area_3d.argtypes = [
+    Float64ArrayType,
+]
+_libwrap_tetinter.tri_area_3d.restype = ctypes.c_double
 
-def plane_tet_inter_points(pp, normal, tet):
+
+def tet_plane_inter_points(pp, normal, tet):
     global _libwrap_tetinter
 
     pint = np.empty((4,3), dtype=np.float64)
@@ -68,7 +73,7 @@ def plane_tet_inter_points(pp, normal, tet):
     return pint[:int_num.value]
 
 
-def plane_tet_inter_tris_batch(pp, normal, tets):
+def tet_plane_inter_tris_batch(pp, normal, tets):
     global _libwrap_tetinter
 
     # Preallocate arrays
@@ -109,10 +114,9 @@ def inter_poly_area(pint):
             np.ascontiguousarray(pint, np.float64)
         )
     elif len(pint == 3):
-        AB = pint[1] - pint[0]
-        AC = pint[2] - pint[0]
-        print np.cross(AB, AC)
-        area = 0.5 * np.linalg.norm(np.cross(AB, AC))
+        area = _libwrap_tetinter.tri_area_3d(
+            np.ascontiguousarray(pint, np.float64)
+        )
     else:
         area = 0.
     return area
@@ -125,22 +129,10 @@ def inter_poly_center(pint):
 class PlaneTetInter(object):
 
     def __init__(self, pp, normal, tet):
-        self.points = plane_tet_inter_points(pp, normal, tet)
+        self.points = tet_plane_inter_points(pp, normal, tet)
         self.n_points = len(self.points)
         self.area = inter_poly_area(self.points)
         if self.n_points > 0:
             self.center = inter_poly_center(self.points)
         else:
             self.center = None
-
-
-def setup_tets():
-    #import tetinter
-    import numpy as np
-
-    pp = np.zeros(3)
-    pp[0]=0.5
-    normal = np.array([1.,0.,0.])
-    tets = np.random.random((3,4,3))
-
-    return pp, normal, tets
