@@ -69,7 +69,12 @@
  */
 
 #include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
 #include <math.h>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 #include "plane_normal_tetrahedron_intersect.h"
 
 
@@ -369,7 +374,153 @@ void batch_intersect_tris(double pp[3], double normal[3], double *Tet_list, int 
       tri_count++;
       tri_num[i] = 1;
     }
-    tri_ptr[i+1] = tri_ptr[i] + tri_num[i];
+    tri_ptr[i+1] = tri_count;
   }
+  return;
+}
+
+
+void batch_intersect_tris_omp(double pp[3], double normal[3], double *Tet_list, int n_Tet,\
+    double *pint, double *int_area, double *int_center, int *tri_num, int *tri_ptr)
+/*
+ *  Parameters:
+ *
+ *    double pp[3], a point on the plane.
+ *
+ *    double normal[3], a normal vector to the plane.
+ *
+ *    double *Tet_list[n_Tet][4][3], ptr to list of vertices for n_Tet tetrahedra.
+ *
+ *    int n_Tet, number of tetrahedra in list Tet_list.
+ *
+ *    double pint[2*n_Tet][3][3], the coordinates of the intersection points.
+ *    There can be up to 2 intersection triangles per tetrahedron.
+ *
+ *    double int_area[2*n_Tet], the areas of the intersection triangles.
+ *
+ *    double int_center[2*n_Tet][3], the center coordinates of the intersection
+ *    triangles.
+ *
+ *    integer tri_num[n_Tet], the number of intersection triangle for each
+ *    tetrahedron.  This will be 0, 1, or 2.
+ *
+ *    integer tri_ptr[n_Tet+1], offsets of the starting point of the intersection
+ *    point data for each tetrahedron.
+ */
+{
+  int tri_count = 0;
+  int *tri_count_thread, *tri_count_cumsum;
+
+  tri_ptr[0] = 0;
+
+  int n_threads = 1;
+#ifdef _OPENMP
+  int n_threads_max = omp_get_max_threads();
+  omp_set_num_threads(n_threads_max);
+#endif  
+
+  # pragma omp parallel firstprivate(tri_count)
+  {
+    int tid = 0;
+#ifdef _OPENMP
+    tid += omp_get_thread_num();
+    
+    # pragma omp single
+    n_threads = omp_get_num_threads();
+#endif
+
+    // Set chunk size and thread local starting index
+    int chunk_size = n_Tet / n_threads;
+    int start = tid * chunk_size;
+    start += tid < n_Tet % n_threads ? tid : n_Tet % n_threads;
+    chunk_size += n_Tet % n_threads > 0 ? 1 : 0;
+
+    // Set starting points for each thread in the output arrays.
+    int ip_s = 2 * 9 * start;
+    int ia_s = 2 * start;
+    int ic_s = 2 * 3 * start;
+
+    # pragma omp single
+    {
+      tri_count_thread = (int *) malloc(n_threads * sizeof(int));
+      tri_count_cumsum = (int *) malloc(n_threads * sizeof(int));
+    }
+
+    # pragma omp for schedule(static, chunk_size)
+    for (int i = 0; i < n_Tet; i++){
+      int int_num;
+
+      tri_num[i] = 0;
+
+      plane_normal_tetrahedron_intersect(pp, normal, (double (*)[3]) &Tet_list[12*i],\
+          (double (*)[3]) &pint[ip_s + 9*tri_count], &int_num);
+
+      // Set intersection triangle areas and centers.
+      if (int_num == 4) {
+        // Split quad into two triangles.
+        memcpy(&pint[ip_s + 9*(tri_count+1)+3], &pint[ip_s + 9*tri_count], 3 * sizeof(double));
+        memcpy(&pint[ip_s + 9*(tri_count+1)+6], &pint[ip_s + 9*tri_count+6], 3 * sizeof(double));
+        int_area[ia_s + tri_count] = tri_area_3d((double (*)[3]) &pint[ip_s + 9*tri_count]);
+        set_inter_poly_center((double (*)[3]) &pint[ip_s + 9*tri_count], 3,\
+            &int_center[ic_s + 3*tri_count]);
+        tri_count++;
+        int_area[ia_s + tri_count] = tri_area_3d((double (*)[3]) &pint[ip_s + 9*tri_count]);
+        set_inter_poly_center((double (*)[3]) &pint[ip_s + 9*tri_count], 3,\
+            &int_center[ic_s + 3*tri_count]);
+        tri_count++;
+        tri_num[i] = 2;
+      }
+      else if (int_num == 3) {
+        int_area[ia_s + tri_count] = tri_area_3d((double (*)[3]) &pint[ip_s + 9*tri_count]);
+        set_inter_poly_center((double (*)[3]) &pint[ip_s + 9*tri_count], 3,\
+            &int_center[ic_s + 3*tri_count]);
+        tri_count++;
+        tri_num[i] = 1;
+      }
+      tri_ptr[i+1] = tri_count;
+    }
+   
+    // Store thread local triangle counts in shared array.
+    tri_count_thread[tid] = tri_count;
+    
+    # pragma omp barrier
+
+    // Determine cumulative sum of triangle counts accross threads.
+    # pragma omp single
+    {
+      int sum = 0;
+      for (int i = 0; i < n_threads; i++){
+        tri_count_cumsum[i] = sum;
+        sum += tri_count_thread[i];
+      }
+    }
+   
+    // Correct thread local triangle data pointer array based on triangle
+    // counts from the other threads. Transforms from local to global offset. 
+    # pragma omp for schedule(static, chunk_size)
+    for (int i = 0; i < n_Tet; i++)
+      tri_ptr[i+1] += tri_count_cumsum[tid];
+
+    // Move thread local data, forming contiguous blocks of output data.
+    # pragma omp for ordered schedule(static, 1)
+    for (int i = 0; i < n_threads; i++) {
+      # pragma omp ordered 
+      memmove(&int_area[tri_count_cumsum[i]], &int_area[ia_s],\
+          tri_count_thread[i] * sizeof(double));
+      # pragma omp ordered 
+      memmove(&int_center[3*tri_count_cumsum[i]], &int_center[ic_s],\
+          3 * tri_count_thread[i] * sizeof(double));
+      # pragma omp ordered 
+      memmove(&pint[9*tri_count_cumsum[i]], &pint[ip_s],\
+          9 * tri_count_thread[i] * sizeof(double));
+    }
+
+    # pragma omp single
+    {
+      free(tri_count_thread);
+      free(tri_count_cumsum);
+    } 
+  }
+
   return;
 }

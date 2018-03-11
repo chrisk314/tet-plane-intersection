@@ -13,5 +13,7 @@ void batch_intersect_polys(double [3], double [3], double *, int , double *,\
     double *, double *, int *, int *);
 void batch_intersect_tris(double [3], double [3], double *, int, double *,\
     double *, double *, int *, int *);
+void batch_intersect_tris_omp(double [3], double [3], double *, int, double *,\
+    double *, double *, int *, int *);
 
 #endif // PLANE_NORMAL_TETRAHEDRON_INTERSECT_H_
