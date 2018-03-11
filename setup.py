@@ -6,7 +6,7 @@ module_tetinter = Extension(
     include_dirs=['./tet_plane_intersect/src'],
     libraries=[],
     library_dirs=[],
-    extra_compile_args=['-fopenmp'],
+    extra_compile_args=['-std=c11', '-fopenmp'],
     extra_link_args=['-lgomp'],
     language='c',
     sources=['./tet_plane_intersect/src/plane_normal_tetrahedron_intersect.c']
