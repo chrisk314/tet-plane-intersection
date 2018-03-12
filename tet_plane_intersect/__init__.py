@@ -1,4 +1,6 @@
 
+"""Calculates intersections between tetrahedra and planes in 3D."""
+
 import ctypes
 import os
 
@@ -57,6 +59,12 @@ _libwrap_tetinter.tri_area_3d.restype = ctypes.c_double
 
 
 def tet_plane_inter_points(pp, normal, tet):
+    """Calculate intersection points for a single tetrahedron.
+    :param pp: ndarray specifying a single point in R^3 on the intersection plane.
+    :param normal: ndarray specifying vector in R^3 normal to the intersection plane.
+    :param tet: ndarray specifying the 4 corners of a tetrahedron in R^3.
+    :returns: ndarray specifying 0, 1, 2, 3, or 4 intersection points.
+    """
     global _libwrap_tetinter
 
     pint = np.empty((4,3), dtype=np.float64)
@@ -74,6 +82,15 @@ def tet_plane_inter_points(pp, normal, tet):
 
 
 def tet_plane_inter_tris_batch(pp, normal, tets):
+    """Calculate intersection triangles for a set of tetrahedra.
+    :param pp: ndarray specifying a single point in R^3 on the intersection plane.
+    :param normal: ndarray specifying vector in R^3 normal to the intersection plane.
+    :param tets: ndarray specifying the 4 corners of n tetrahedra in R^3.
+    :returns: tuple containing ndarrays specifying 0, 1, 2, 3, or 4 intersection
+        points, areas, and center coordinates of each intersection triangle, as well
+        as the number of intersection triangles and the offset of the data for each
+        tetrahedron in the input.
+    """
     global _libwrap_tetinter
 
     # Preallocate arrays
@@ -107,6 +124,10 @@ def tet_plane_inter_tris_batch(pp, normal, tets):
 
 
 def inter_poly_area(pint):
+    """Return area for intersection polygon.
+    :param pint: ndarray containing intersection points.
+    :return: float area of polygon.
+    """
     global _libwrap_tetinter
 
     if len(pint) == 4:
@@ -123,10 +144,16 @@ def inter_poly_area(pint):
 
 
 def inter_poly_center(pint):
+    """Return center of mass of intersection points.
+    :param pint: ndarray containing intersection points.
+    :return: ndarray containing COM of intersection points in R^3.
+    """
     return np.mean(pint, axis=0)
 
 
 class PlaneTetInter(object):
+
+    """Represents the intersection of a plane and a tetrahedron."""
 
     def __init__(self, pp, normal, tet):
         self.points = tet_plane_inter_points(pp, normal, tet)
